@@ -58,7 +58,7 @@ server <- function(input, output) {
     if (input$joint_filing == "Yes"){
       cp_gains <- cg_tax(input$joint_gains, input$joint_income_bracket, input$joint_time, TRUE)
     } else if (input$joint_filing == "No"){
-      cp_gains <- cg_tax(input$joint_gains, input$joint_income_bracket, input$joint_time, FALSE)
+      cp_gains <- cg_tax(input$ind_gains, input$ind_income_bracket, input$ind_time, FALSE)
     }
     return(cp_gains)
   })
@@ -69,7 +69,7 @@ server <- function(input, output) {
     if (input$joint_filing == "Yes"){
       qof_gains <- qof_tax(input$joint_gains, input$joint_income_bracket, input$joint_time, input$joint_basis, TRUE)
     } else if (input$joint_filing == "No"){
-      qof_gains <- qof_tax(input$joint_gains, input$joint_income_bracket, input$joint_time, input$ind_basis, FALSE)
+      qof_gains <- qof_tax(input$ind_gains, input$ind_income_bracket, input$ind_time, input$ind_basis, FALSE)
     }
     return(qof_gains)
   })
