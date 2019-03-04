@@ -4,7 +4,7 @@ library(shiny)
 # Source tax calculation script
 source('calculate_taxes.R')
 
-# Create self-named lists of tax brackets for inputs
+# Create self-named lists of tax brackets for inputs (this is dumb I know)
 ind_rates <- names(ind_tax_rates)
 names(ind_rates) <- ind_rates
 joint_rates <- names(joint_tax_rates)
@@ -15,8 +15,12 @@ ui <- fluidPage(
   titlePanel("Opportunity Fund Calculator"),
   sidebarLayout(
     sidebarPanel(
+      
+      # Initialize with filtering question for filing status
       selectInput("joint_filing", "Are you filing your taxes jointly?", 
                   choices = c("","Yes", "No")),
+      
+      # Input options for joint filing
       conditionalPanel(
         condition = "input.joint_filing == 'Yes'",
         selectInput("joint_income_bracket", "What is your annual income?",
@@ -26,6 +30,7 @@ ui <- fluidPage(
         sliderInput("joint_time", "Years held:", min = 0, max = 30, value = 0, step = 1)
       ),
       
+      # Input options for single filing
       conditionalPanel(
         condition = "input.joint_filing == 'No'",
         selectInput("ind_income_bracket", "What is your annual income?",
@@ -37,6 +42,7 @@ ui <- fluidPage(
       
     ),
     
+    # Output tax rates for capital gains and QOF's
     mainPanel(
       htmlOutput("calculate_taxes")
     )
@@ -57,6 +63,7 @@ server <- function(input, output) {
     return(cp_gains)
   })
   
+  # Calculate tax rates on a QOF
   qof_gains <- reactive({
     req(input$joint_filing)
     if (input$joint_filing == "Yes"){
@@ -67,12 +74,12 @@ server <- function(input, output) {
     return(qof_gains)
   })
   
+  # Render HTML text output
   output$calculate_taxes <- renderUI({
     str1 <- paste0("Your taxes on your capital gains are: $", capital_gains())
     str2 <- paste0("You taxes on your capital gains in an Opportunity Fund are: $", qof_gains())
     HTML(paste(str1, str2, sep = '<br/>'))
   })
-  
 }
 
 # Create Shiny app
