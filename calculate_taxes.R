@@ -11,11 +11,14 @@ names(joint_tax_rates) <- c("$0-$19,050", "$19,051-$77,400", "$77,401-$165,000",
 
 # Function to calculate the tax on capital gains based on capital gains, income,
 # duration of investment and whether or not the filing is joint
-cg_tax <- function(gains, income_bracket, time, joint){
+cg_tax <- function(gains, income_bracket, time, joint=FALSE){
+  # Initialize tax variable for tax paid on capital gains
+  taxes <- NULL
+  tax_rate <- NULL
   # Determine tax rate
   if (joint==TRUE){
     tax_rate <- joint_tax_rates[income_bracket]
-  } else if (joint==FALSE) {
+  } else {
     tax_rate <- ind_tax_rates[income_bracket]
   }
   # Calculate taxes on short-term and long-term capital gains

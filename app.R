@@ -1,5 +1,7 @@
 # Load libraries
 library(shiny)
+library(ggplot2)
+library(plotly)
 
 # Source tax calculation script
 source('calculate_taxes.R')
@@ -25,9 +27,12 @@ ui <- fluidPage(
         condition = "input.joint_filing == 'Yes'",
         selectInput("joint_income_bracket", "What is your annual income?",
                     choices = c("",joint_rates)),
-        numericInput("joint_basis", "Initial investment:", 100000, min = 0, step = 1000),
-        numericInput("joint_gains", "Expected capital gains:", 50000, min = 0, step = 1000),
-        sliderInput("joint_time", "Years held:", min = 0, max = 30, value = 0, step = 1)
+        conditionalPanel(
+          condition = "input.joint_income_bracket != ''",
+          numericInput("joint_basis", "Initial investment:", 100000, min = 0, step = 1000),
+          numericInput("joint_gains", "Expected capital gains:", 50000, min = 0, step = 1000),
+          sliderInput("joint_time", "Years held:", min = 0, max = 30, value = 0, step = 1)
+        )
       ),
       
       # Input options for single filing
@@ -35,16 +40,20 @@ ui <- fluidPage(
         condition = "input.joint_filing == 'No'",
         selectInput("ind_income_bracket", "What is your annual income?",
                     choices = c("",ind_rates)),
-        numericInput("ind_basis", "Initial investment:", 100000, min = 0, step = 1000),
-        numericInput("ind_gains", "Expected capital gains:", 50000, min = 0, step = 1000),
-        sliderInput("ind_time", "Years held:", min = 0, max = 30, value = 0, step = 1)
+        conditionalPanel(
+          condition = "input.ind_income_bracket != ''",
+          numericInput("ind_basis", "Initial investment:", 100000, min = 0, step = 1000),
+          numericInput("ind_gains", "Expected capital gains:", 50000, min = 0, step = 1000),
+          sliderInput("ind_time", "Years held:", min = 0, max = 30, value = 0, step = 1)
+        )
       )
       
     ),
     
     # Output tax rates for capital gains and QOF's
     mainPanel(
-      htmlOutput("calculate_taxes")
+      plotOutput("tax_viz")
+      #htmlOutput("calculate_taxes")
     )
   )
 )
@@ -72,6 +81,25 @@ server <- function(input, output) {
       qof_gains <- qof_tax(input$ind_gains, input$ind_income_bracket, input$ind_time, input$ind_basis, FALSE)
     }
     return(qof_gains)
+  })
+  
+  # Create data frame for visualization
+  build_df <- reactive({
+    req(input$joint_filing)
+    viz_data <- data.frame(Investment = c("Captial Gains", "Opportunity Fund"), Taxes = c(capital_gains(), qof_gains()))
+    viz_data$lab <- paste0("$", viz_data$Taxes)
+    return(viz_data)
+  })
+  
+  # Create horizontal bar plot of taxes
+  output$tax_viz <- renderPlot({
+    req(input$joint_filing)
+    ggplot(data = build_df(), aes(x = Investment, y = Taxes, fill = Investment, label = lab)) +
+      geom_bar(stat = "identity") +
+      geom_text(aes(label=paste0("$",Taxes)), color = "white", hjust=1.2) +
+      scale_fill_manual(values = c("#4776BA", "#F5811D")) +
+      theme(legend.title = element_blank()) +
+      coord_flip()
   })
   
   # Render HTML text output
