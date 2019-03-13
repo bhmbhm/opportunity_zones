@@ -6,14 +6,6 @@ library(plotly)
 # Source tax calculation script
 source('calculate_taxes.R')
 
-# Create self-named lists of tax brackets for inputs (this is dumb I know)
-ind_rates <- names(ind_tax_rates)
-names(ind_rates) <- ind_rates
-joint_rates <- names(joint_tax_rates)
-names(joint_rates) <- joint_rates
-hoh_rates <- names(hoh_tax_rates)
-names(hoh_rates) <- hoh_rates
-
 # Define UI
 ui <- fluidPage(
   titlePanel("Opportunity Fund Calculator"),
@@ -27,10 +19,10 @@ ui <- fluidPage(
       # Input options for tax status
       conditionalPanel(
         condition = "input.filing_status != ''",
-        numericInput("income", "Annual income:", 60000, min = 0, step = 1000),
-        numericInput("investment", "Initial investment:", 100000, min = 0, step = 1000),
+        numericInput("income", "Expected taxable income:", 60000, min = 0, step = 1000),
+        numericInput("investment", "Price of purchase:", 100000, min = 0, step = 1000),
         numericInput("sale", "Price of sale:", 120000, min = 0, step = 1000),
-        sliderInput("time", "Years held:", min = 0, max = 30, value = 0, step = 1)
+        sliderInput("time", "Years from purchase to sale:", min = 0, max = 30, value = 0, step = 1)
       )
     ),
     
