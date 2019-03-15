@@ -12,7 +12,6 @@ library(dplyr)
 cg_tax <- function(filing_status, income, investment, sale, time){
   # Initialize tax variable for tax paid on capital gains
   taxes <- NULL
-  short_term_taxes <- NULL
   tax_rate <- NULL
   
   # Calculate gains from sale and investment

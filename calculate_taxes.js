@@ -10,7 +10,6 @@
 function cg_tax(filing_status, income, investment, sale, time) {
   // Initialize tax variable for tax paid on capital gains
   var taxes;
-  var short_term_taxes;
   var tax_rate;
   var gains;
   
