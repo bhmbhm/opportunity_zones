@@ -164,3 +164,8 @@ function qof_tax(filing_status, income, investment, sale, time){
   // Output taxes on capital gains in QOF
   return taxes;
 }
+
+console.log(cg_tax("Single filer", 90000, 100000, 120000, 7))
+
+console.log(qof_tax("Single filer", 90000, 100000, 120000, 7))
+
