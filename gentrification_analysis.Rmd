@@ -1,0 +1,945 @@
+---
+title: "Gentrification Analysis"
+author: "Ben Herndon-Miller"
+date: "4/14/2019"
+output: pdf_document
+---
+
+# Load software and data
+
+```{r setup, include=FALSE}
+# Load packages
+library(knitr) 
+library(tidyverse)
+library(rgdal)
+library(tigris)
+library(leaflet)
+library(mapview)
+library(ggplot2)
+library(caret)
+library(glmnet)
+library(randomForest)
+library(xgboost)
+
+# Set default knitr options for knitting code into the report:
+opts_chunk$set(echo=TRUE,  # change to FALSE to keep code out of the knitted document
+               cache=FALSE, # re-run code that has already been run?
+               autodep=TRUE, # assure that caching dependencies are updated correctly
+               cache.comments=FALSE, # do not re-run a chunk if only comments are changed
+               message=FALSE, # change to FALSE to keep messages out of the knitted document
+               warning=FALSE,  # change to FALSE to keep warnings out of the knitted document
+               comment = NA,
+               tidy = TRUE,
+               tidy.opts=list(width.cutoff=60))
+
+# Set seed for reproducibility
+set.seed(123)
+```
+
+## Source data and make map labels
+
+```{r}
+# Load gentrification data
+source('clean_gentrification_data.R')
+
+# Convert GEOID to character
+acs_data$GEOID <- as.character(acs_data$GEOID)
+
+# Load shape data
+houston_shps <- tracts("TX", county = c("Harris County", "Montgomery County", "Fort Bend County"))
+
+# Create dataset for map
+houston_shps@data <- houston_shps@data %>%
+  left_join(acs_data, by = "GEOID") %>%
+  mutate(pop_label = ifelse(pop_change >= 0, 
+                            paste0("+",round(pop_change*100,1),"%"),
+                            paste0(round(pop_change*100,1),"%")),
+         inpov_label = ifelse(inpov_change >= 0, 
+                              paste0("+",round(inpov_change*100,1),"%"),
+                              paste0(round(inpov_change*100,1),"%")),
+         nonwhite_label = ifelse(nonwhite_change >= 0, 
+                                 paste0("+",round(nonwhite_change*100,1),"%"),
+                                 paste0(round(nonwhite_change*100,1),"%")),
+         college_label = ifelse(college_change >= 0, 
+                                paste0("+",round(college_change*100,1),"%"),
+                                paste0(round(college_change*100,1),"%")),
+         med_inc_label = ifelse(med_inc_change >= 0, 
+                                paste0("+",round(med_inc_change*100,1),"%"),
+                                paste0(round(med_inc_change*100,1),"%")),
+         med_rent_label = ifelse(med_rent_change >= 0, 
+                                 paste0("+",round(med_rent_change*100,1),"%"),
+                                 paste0(round(med_rent_change*100,1),"%")),
+         med_val_label = ifelse(med_val_change >= 0, 
+                                paste0("+",round(med_val_change*100,1),"%"),
+                                paste0(round(med_val_change*100,1),"%")),
+         total_renters_label = ifelse(renters_change >= 0, 
+                                paste0("+",round(renters_change*100,1),"%"),
+                                paste0(round(renters_change*100,1),"%")),
+         total_houses_label = ifelse(total_houses_change >= 0, 
+                                     paste0("+",round(total_houses_change*100,1),"%"),
+                                     paste0(round(total_houses_change*100,1),"%")))
+```
+
+# Visualizations
+
+## Opportunity Zone Map
+
+```{r}
+# Define logo for map 
+img <- "http://januaryadvisors.com/wp-content/uploads/2013/05/ja-og.png"
+
+# Subset data frames for plotting
+ozs <- subset(houston_shps, op_zone == 1)
+eligible_ozs <- subset(houston_shps, op_zone == 0 & op_zone_eligible == 1)
+
+# Create labels for the map
+tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  houston_shps@data$GEOID, 
+  houston_shps@data$pop_label, 
+  houston_shps@data$nonwhite_label,
+  houston_shps@data$inpov_label,
+  houston_shps@data$college_label,
+  houston_shps@data$med_inc_label,
+  houston_shps@data$med_rent_label,
+  houston_shps@data$med_val_label,
+  houston_shps@data$total_renters_label,
+  houston_shps@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+oz_tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  ozs@data$GEOID, 
+  ozs@data$pop_label, 
+  ozs@data$nonwhite_label,
+  ozs@data$inpov_label,
+  ozs@data$college_label,
+  ozs@data$med_inc_label,
+  ozs@data$med_rent_label,
+  ozs@data$med_val_label,
+  ozs@data$total_renters_label,
+  ozs@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+eligible_tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  eligible_ozs@data$GEOID, 
+  eligible_ozs@data$pop_label, 
+  eligible_ozs@data$nonwhite_label,
+  eligible_ozs@data$inpov_label,
+  eligible_ozs@data$college_label,
+  eligible_ozs@data$med_inc_label,
+  eligible_ozs@data$med_rent_label,
+  eligible_ozs@data$med_val_label,
+  eligible_ozs@data$total_renters_label,
+  eligible_ozs@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+# Map of Opportunity Zones
+oz_map <- leaflet() %>%
+      addTiles() %>% 
+      setView(-95.37, 29.76, zoom = 9) %>%
+      addPolygons(data = houston_shps,
+          fillColor = "#000000",
+          weight = 1,
+          opacity = 0.7,
+          color = "#FFFFFF",
+          dashArray = "",
+          fillOpacity = 0,
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#000000",
+            dashArray = "",
+            fillOpacity = 0,
+            bringToFront = TRUE),
+          label = tract_labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto")) %>%
+      addPolygons(data = ozs,
+              fillColor = "#F5811D",
+              weight = 1,
+              opacity = 0.7,
+              color = "#FFFFFF",
+              dashArray = "",
+              fillOpacity = 0.7,
+              group = "Opportunity Zone",
+              highlight = highlightOptions(
+                weight = 3,
+                color = "#000000",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = oz_tract_labels,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "12px",
+                direction = "auto")) %>%
+        addPolygons(data = eligible_ozs,
+              fillColor = "#4776BA",
+              weight = 1,
+              opacity = 0.7,
+              color = "#FFFFFF",
+              dashArray = "",
+              fillOpacity = 0.7,
+              group = "Eligible Opportunity Zone",
+              highlight = highlightOptions(
+                weight = 3,
+                color = "#000000",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = eligible_tract_labels,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "12px",
+                direction = "auto")) %>%
+        addLayersControl(overlayGroups = c("Opportunity Zone", "Eligible Opportunity Zone")) %>%
+        hideGroup("Eligible Opportunity Zone") %>%
+        addLogo(img, url = "http://januaryadvisors.com/wp-content/uploads/2013/05/ja-og", 
+              position = "bottomleft", height = 100, width = 100, offset.x = 20, offset.y = 20) %>%
+        addLegend(position = "bottomright", colors = c("#F5811D", "#4776BA"), 
+                  labels = c("Opportunity Zones", "Eligible Opportunity Zones"), opacity = 0.7)
+
+oz_map
+```
+
+## Gentrification Map
+
+```{r}
+# Subset data frames for plotting
+vulnerable <- subset(houston_shps, vulnerable == 1)
+dem_gent <- subset(houston_shps, dem_gentrification == 1)
+inv_gent <- subset(houston_shps, inv_gentrification == 1)
+fed_vuln <- subset(houston_shps, fed_vulnerable == 1)
+fed_gent <- subset(houston_shps, fed_gentrifying == 1)
+
+# Create labels for map
+vulnerable_tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  vulnerable@data$GEOID, 
+  vulnerable@data$pop_label, 
+  vulnerable@data$nonwhite_label,
+  vulnerable@data$inpov_label,
+  vulnerable@data$college_label,
+  vulnerable@data$med_inc_label,
+  vulnerable@data$med_rent_label,
+  vulnerable@data$med_val_label,
+  vulnerable@data$total_renters_label,
+  vulnerable@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+dem_gent_tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  dem_gent@data$GEOID, 
+  dem_gent@data$pop_label, 
+  dem_gent@data$nonwhite_label,
+  dem_gent@data$inpov_label,
+  dem_gent@data$college_label,
+  dem_gent@data$med_inc_label,
+  dem_gent@data$med_rent_label,
+  dem_gent@data$med_val_label,
+  dem_gent@data$total_renters_label,
+  dem_gent@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+inv_gent_tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  inv_gent@data$GEOID, 
+  inv_gent@data$pop_label, 
+  inv_gent@data$nonwhite_label,
+  inv_gent@data$inpov_label,
+  inv_gent@data$college_label,
+  inv_gent@data$med_inc_label,
+  inv_gent@data$med_rent_label,
+  inv_gent@data$med_val_label,
+  inv_gent@data$total_renters_label,
+  inv_gent@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+fed_vuln_tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  fed_vuln@data$GEOID, 
+  fed_vuln@data$pop_label, 
+  fed_vuln@data$nonwhite_label,
+  fed_vuln@data$inpov_label,
+  fed_vuln@data$college_label,
+  fed_vuln@data$med_inc_label,
+  fed_vuln@data$med_rent_label,
+  fed_vuln@data$med_val_label,
+  fed_vuln@data$total_renters_label,
+  fed_vuln@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+fed_gent_tract_labels <- sprintf(
+  paste0("<strong>GEOID: %s</strong>",
+         "<br/>Total Population: %s",
+         "<br/>Non-white Population: %s",
+         "<br/>Low-income Population: %s",
+         "<br/>College Educated Population: %s",
+         "<br/>Median Income: %s",
+         "<br/>Median Rent: %s",
+         "<br/>Median Home Value: %s",
+         "<br/>Number of Renters: %s",
+         "<br/>Number of Houses: %s"),
+  fed_gent@data$GEOID, 
+  fed_gent@data$pop_label, 
+  fed_gent@data$nonwhite_label,
+  fed_gent@data$inpov_label,
+  fed_gent@data$college_label,
+  fed_gent@data$med_inc_label,
+  fed_gent@data$med_rent_label,
+  fed_gent@data$med_val_label,
+  fed_gent@data$total_renters_label,
+  fed_gent@data$total_houses_label) %>% 
+  lapply(htmltools::HTML)
+
+# Map of Gentrified Census Tracts
+gent_map <- leaflet() %>%
+      addTiles() %>% 
+      setView(-95.37, 29.76, zoom = 9) %>%
+      addPolygons(data = houston_shps,
+          fillColor = "#000000",
+          weight = 1,
+          opacity = 0.7,
+          color = "#FFFFFF",
+          dashArray = "",
+          fillOpacity = 0,
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#000000",
+            dashArray = "",
+            fillOpacity = 0,
+            bringToFront = TRUE),
+          label = tract_labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto")) %>%
+      addPolygons(data = vulnerable,
+          fillColor = "#13C18D",
+          weight = 1,
+          opacity = 0.7,
+          color = "#FFFFFF",
+          dashArray = "",
+          fillOpacity = 0.7,
+          group = "Kinder: Gentrifiable",
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#000000",
+            dashArray = "",
+            fillOpacity = 0.7,
+            bringToFront = TRUE),
+          label = vulnerable_tract_labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto")) %>%
+      addPolygons(data = dem_gent,
+          fillColor = "#A71183",
+          weight = 1,
+          opacity = 0.7,
+          color = "#FFFFFF",
+          dashArray = "",
+          fillOpacity = 0.7,
+          group = "Kinder: Gentrifying Demographically",
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#000000",
+            dashArray = "",
+            fillOpacity = 0.7,
+            bringToFront = TRUE),
+          label = dem_gent_tract_labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto")) %>%
+      addPolygons(data = inv_gent,
+          fillColor = "#2575B7",
+          weight = 1,
+          opacity = 0.7,
+          color = "#FFFFFF",
+          dashArray = "",
+          fillOpacity = 0.7,
+          group = "Kinder: Gentrifying Financially",
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#000000",
+            dashArray = "",
+            fillOpacity = 0.7,
+            bringToFront = TRUE),
+          label = inv_gent_tract_labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto")) %>%
+      addPolygons(data = fed_vuln,
+          fillColor = "#C11344",
+          weight = 1,
+          opacity = 0.7,
+          color = "#FFFFFF",
+          dashArray = "",
+          fillOpacity = 0.7,
+          group = "Federal Reserve: Gentrifiable",
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#000000",
+            dashArray = "",
+            fillOpacity = 0.7,
+            bringToFront = TRUE),
+          label = fed_vuln_tract_labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto")) %>%
+      addPolygons(data = fed_gent,
+          fillColor = "#081F30",
+          weight = 1,
+          opacity = 0.7,
+          color = "#FFFFFF",
+          dashArray = "",
+          fillOpacity = 0.9,
+          group = "Federal Reserve: Gentrifying",
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#000000",
+            dashArray = "",
+            fillOpacity = 0.9,
+            bringToFront = TRUE),
+          label = fed_gent_tract_labels,
+          labelOptions = labelOptions(
+            style = list("font-weight" = "normal", padding = "3px 8px"),
+            textsize = "12px",
+            direction = "auto")) %>%
+      addLayersControl(baseGroups = c("Federal Reserve: Gentrifiable", "Federal Reserve: Gentrifying", "Kinder: Gentrifiable", "Kinder: Gentrifying Demographically", "Kinder: Gentrifying Financially")) %>%
+      addLogo(img, url = "http://januaryadvisors.com/wp-content/uploads/2013/05/ja-og", 
+              position = "bottomleft", height = 100, width = 100, offset.x = 20, offset.y = 20) %>%
+      addLegend(position = "bottomright", colors = c("#C11344", "#081F30", "#13C18D", "#A71183", "#2575B7"), 
+                  labels = c("Federal Reserve: Gentrifiable", "Federal Reserve: Gentrifying", "Kinder: Gentrifiable", "Kinder: Gentrifying Demographically", "Kinder: Gentrifying Financially"), opacity = 0.7)
+
+gent_map
+```
+
+## Gentrification Risk-Factors by Op-Zone Status
+
+### Wrangle data
+
+```{r}
+# Create factor level of census tract status for grouping
+acs_data$tract_status <- NA
+acs_data$tract_status[acs_data$op_zone == 1] <- "Opportunity Zone"
+acs_data$tract_status[acs_data$op_zone == 0 & acs_data$op_zone_eligible == 1] <- "Eligible"
+acs_data$tract_status[acs_data$op_zone == 0 & acs_data$op_zone_eligible == 0] <- "Not-Eligible"
+
+# Calculate gentrification status by tract status
+gent_data <- acs_data %>%
+  filter(!is.na(tract_status)) %>%
+  group_by(tract_status) %>%
+  summarise(vulnerability_avg = mean(vulnerable, na.rm = TRUE),
+            dem_change_avg = mean(dem_gentrification, na.rm = TRUE),
+            inv_change_avg = mean(inv_gentrification, na.rm = TRUE),
+            fed_vuln_avg = mean(fed_vulnerable, na.rm = TRUE),
+            fed_gent_avg = mean(fed_gentrifying, na.rm = TRUE)) %>%
+  gather("variable", "value", -tract_status) %>%
+  mutate(tract_order = case_when(tract_status == "Opportunity Zone" ~ "C",
+                                 tract_status == "Eligible" ~ "B",
+                                 tract_status == "Not-Eligible" ~ "A"),
+         var_order = case_when(variable == "vulnerability_avg" ~ "D",
+                               variable == "fed_vuln_avg" ~ "E",
+                               variable == "fed_gent_avg" ~ "C",
+                               variable == "dem_change_avg" ~ "B",
+                               variable == "inv_change_avg" ~ "A"))
+
+# Set nonwhite quantiles
+nonwhite_quantiles <- seq(0,1,0.1)
+
+# Calculate op zone status by nonwhite status
+nonwhite_ozs <- acs_data %>%
+  mutate(non_white_bin = .bincode(pct_nonwhite_2016, nonwhite_quantiles, TRUE, TRUE)) %>%
+  group_by(non_white_bin) %>%
+  summarise(pct_opzones = mean(op_zone, na.rm = TRUE),
+            tracts = n())
+
+# Set college quantiles
+college_quantiles <- seq(0,0.7,0.1)
+
+# Calculate op zone status by college status
+college_ozs <- acs_data %>%
+  mutate(college_bin = .bincode(pct_college_2016, college_quantiles, TRUE, TRUE)) %>%
+  group_by(college_bin) %>%
+  summarise(pct_opzones = mean(op_zone, na.rm = TRUE),
+            tracts = n())
+
+# Set renter quantiles
+renter_quantiles <- seq(0,1,0.1)
+
+# Calculate op zone status by renter status
+renter_ozs <- acs_data %>%
+  mutate(renter_bin = .bincode(pct_renters_2016, renter_quantiles, TRUE, TRUE)) %>%
+  group_by(renter_bin) %>%
+  summarise(pct_opzones = mean(op_zone, na.rm = TRUE),
+            tracts = n())
+
+# Set in-poverty quantiles
+inpov_quantiles <- c(seq(0,0.4,0.1),1)
+
+# Calculate op zone status by in-poverty status
+inpov_ozs <- acs_data %>%
+  mutate(inpov_bin = .bincode(pct_inpov_2016, inpov_quantiles, TRUE, TRUE)) %>%
+  group_by(inpov_bin) %>%
+  summarise(pct_opzones = mean(op_zone, na.rm = TRUE),
+            tracts = n())
+  
+```
+
+### Bar plot by gentrification criteria
+
+```{r}
+# Grouped bar plot
+gent_plot <- ggplot(gent_data, aes(var_order, value)) +
+  geom_bar(aes(fill = tract_order), position = "dodge", stat = "identity") + 
+  scale_fill_manual(labels = c("Not Eligible", "Eligible", "Opportunity Zone"), 
+                    values = c("#cccccc", "#319CF4", "#FF8B00")) +
+  scale_x_discrete(labels = c("Kinder: Gentrifying Financially", "Kinder: Gentrifying Demographically","Federal Reserve: Gentrifying", "Kinder: Gentrifiable", "Federal Reserve: Gentrifiable")) +
+  scale_y_continuous(breaks = seq(0,1,0.1), 
+                     labels = paste0(seq(0,1,0.1)*100,"%")) +
+  ylab("% Meeting Criteria") +
+  labs(fill = "Census Tract Designation") +
+  #ggtitle("Gentrification Criteria by Opportunity Zone Status") +
+  theme_light() + 
+  theme(plot.title = element_text(family = "Roboto", size = 20),
+        axis.title.x = element_text(family = "Roboto", size = 20, vjust = -5),
+        axis.title.y = element_blank(),
+        legend.title = element_text(family = "Roboto", size = 14),
+        legend.text = element_text(family = "Roboto", size = 14),
+        axis.text.x = element_text(family = "Roboto", size = 14),
+        axis.text.y = element_text(family = "Roboto", size = 14),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        plot.margin=unit(c(1,1,1.5,1.2),"cm")) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  coord_flip()
+
+gent_plot
+```
+
+### Bar plot by nonwhite population
+
+```{r}
+# Grouped bar plot
+nonwhite_plot <- ggplot(nonwhite_ozs, aes(non_white_bin, pct_opzones)) +
+  geom_bar(stat = "identity", fill = "#FF8B00") +
+  scale_x_continuous(breaks = seq(1,10),
+                     labels = paste0(seq(0.1,1,0.1)*100,"%")) + 
+  scale_y_continuous(breaks = seq(0,0.8,0.1), 
+                     labels = paste0(seq(0,0.8,0.1)*100,"%")) +
+  ylab("Census Tracts Designated Opportunity Zones") + 
+  xlab("Non-white Population") + 
+  theme_light() + 
+  theme(plot.title = element_text(family = "Roboto", size = 20),
+        axis.title.x = element_text(family = "Roboto", size = 20, vjust = -4),
+        axis.title.y = element_text(family = "Roboto", size = 20,  vjust = 4),
+        legend.title = element_text(family = "Roboto"),
+        legend.text = element_text(family = "Roboto"),
+        axis.text.x = element_text(family = "Roboto", size = 16),
+        axis.text.y = element_text(family = "Roboto", size = 16),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.margin=unit(c(1,1,1.5,1.2),"cm"))
+
+nonwhite_plot
+```
+
+
+### Bar plot by college educated population
+
+```{r}
+# Grouped bar plot
+college_plot <- ggplot(college_ozs, aes(college_bin, pct_opzones)) +
+  geom_bar(stat = "identity", fill = "#319CF4") +
+  scale_x_continuous(breaks = seq(1,7),
+                     labels = paste0(seq(0.1,0.7,0.1)*100,"%")) + 
+  scale_y_continuous(breaks = seq(0,0.3,0.05), 
+                     labels = paste0(seq(0,0.3,0.05)*100,"%")) +
+  ylab("% of Census Tracts") + 
+  xlab("College Educated Population") + 
+  theme_light() + 
+  theme(plot.title = element_text(family = "Roboto", size = 20),
+        axis.title.x = element_text(family = "Roboto", size = 20, vjust = -4),
+        axis.title.y = element_text(family = "Roboto", size = 20,  vjust = 4),
+        legend.title = element_text(family = "Roboto"),
+        legend.text = element_text(family = "Roboto"),
+        axis.text.x = element_text(family = "Roboto", size = 16),
+        axis.text.y = element_text(family = "Roboto", size = 16),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.margin=unit(c(1,1,1.5,1.2),"cm"))
+
+college_plot
+```
+
+### Bar plot by renter population
+
+```{r}
+# Grouped bar plot
+renter_plot <- ggplot(renter_ozs, aes(renter_bin, pct_opzones)) +
+  geom_bar(stat = "identity", fill = "#13C18D") +
+  scale_x_continuous(breaks = seq(1,10),
+                     labels = paste0(seq(0.1,1,0.1)*100,"%")) + 
+  scale_y_continuous(breaks = seq(0,0.4,0.05), 
+                     labels = paste0(seq(0,0.4,0.05)*100,"%")) +
+  ylab("% of Census Tracts") + 
+  xlab("Population Renting") + 
+  theme_light() + 
+  theme(plot.title = element_text(family = "Roboto", size = 20),
+        axis.title.x = element_text(family = "Roboto", size = 20, vjust = -4),
+        axis.title.y = element_text(family = "Roboto", size = 20,  vjust = 4),
+        legend.title = element_text(family = "Roboto"),
+        legend.text = element_text(family = "Roboto"),
+        axis.text.x = element_text(family = "Roboto", size = 16),
+        axis.text.y = element_text(family = "Roboto", size = 16),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.margin=unit(c(1,1,1.5,1.2),"cm"))
+
+renter_plot
+```
+
+
+### Bar plot by in-poverty population
+
+```{r}
+# Grouped bar plot
+inpov_plot <- ggplot(inpov_ozs, aes(inpov_bin, pct_opzones)) +
+  geom_bar(stat = "identity", fill = "#A71183") +
+  scale_x_continuous(breaks = seq(1,5),
+                     labels = c("10%", "20%", "30%", "40%", ">50%")) + 
+  scale_y_continuous(breaks = seq(0,0.5,0.05), 
+                     labels = paste0(seq(0,0.5,0.05)*100,"%")) +
+  ylab("% of Census Tracts") + 
+  xlab("Population Below Poverty-Line") + 
+  theme_light() + 
+  theme(plot.title = element_text(family = "Roboto", size = 20),
+        axis.title.x = element_text(family = "Roboto", size = 20, vjust = -4),
+        axis.title.y = element_text(family = "Roboto", size = 20,  vjust = 4),
+        legend.title = element_text(family = "Roboto"),
+        legend.text = element_text(family = "Roboto"),
+        axis.text.x = element_text(family = "Roboto", size = 16),
+        axis.text.y = element_text(family = "Roboto", size = 16),
+        panel.border = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        plot.margin=unit(c(1,1,1.5,1.2),"cm"))
+
+inpov_plot
+```
+
+# Modeling
+
+## Pre-Process Data
+
+```{r}
+# Pull data for model, choose weakly gentrified to be outcome of interest
+acs_model_data <- acs_data %>%
+  select(c(vulnerable, nonwhite_change, black_change, asian_change, hispanic_change,
+           renters_change, inpov_change, college_change, pop_change, med_rent_change,
+           med_val_change, total_houses_change, op_zone, op_zone_eligible))
+
+# Filter for rows that are not NA
+acs_model_data <- acs_model_data[complete.cases(acs_model_data),]
+
+# Check for predictors with near-zero variance
+nzv <- nearZeroVar(acs_model_data, saveMetrics = TRUE)
+
+# Check for highly correlated variables
+cor_vars <- cor(acs_model_data)
+high_cor <- sum(abs(cor_vars[upper.tri(cor_vars)]) > .8)
+
+# Check for linear combinations
+lin_combos <- findLinearCombos(acs_model_data)
+
+# Change categorical variables to factor
+acs_model_data$vulnerable <- as.factor(acs_model_data$vulnerable)
+acs_model_data$op_zone <- as.factor(acs_model_data$op_zone)
+acs_model_data$op_zone_eligible <- as.factor(acs_model_data$op_zone_eligible)
+
+# Create vector of numeric variables
+num_vecs <- unlist(lapply(acs_model_data, is.numeric))
+
+# Center and scale data for prediction
+#process_var <- preProcess(acs_model_data[,num_vecs], method = c("center", "scale"))
+#acs_model_data[,num_vecs] <- predict(process_var, acs_model_data[,num_vecs])
+
+# Chunk data 
+idx <- sample(1:nrow(acs_model_data), nrow(acs_model_data)*.7, replace = FALSE)
+train_data <- acs_model_data[idx,]
+test_data <- acs_model_data[-idx,]
+```
+
+## Fit Logistic Regression Model
+
+```{r}
+# Fit logistic regression model
+logistic_fit <- glm(data = acs_model_data, formula = vulnerable ~ ., family = "binomial")
+summary(logistic_fit)
+```
+
+### Visualize Logistic Regression Results
+
+```{r}
+log_results <- data.frame(var = names(logistic_fit$coefficients[-1]), val = logistic_fit$coefficients[-1])
+```
+
+
+## Predict Gentrification with Lasso
+
+```{r}
+# Create vector of lambdas to tune across
+lambdas <- 10^seq(-4, 4, by = .1)
+
+# Perform cross-validation to tune lambda
+lasso_cv <- cv.glmnet(data.matrix(train_data[,-1]), train_data[,1], family = "binomial", 
+                      alpha = 1, type.measure = "auc", lambda = lambdas)
+
+# Predict on test data
+lasso_y_hat <- round(predict(lasso_cv, newx = data.matrix(test_data[,-1]), s = "lambda.min", type = "response"))
+
+# Prediction accuracy
+lasso_acc <- mean(lasso_y_hat == test_data[,1])
+```
+
+## Selected features
+
+### Non-zero coefficients
+
+```{r}
+# Show selected features from optimal lasso
+coef(lasso_cv, s = "lambda.min")
+```
+
+### Plot coefficient vs. lambda
+
+```{r}
+# Function for labels
+lbs_fun <- function(fit, ...) {
+        L <- length(lasso_fit$lambda)
+        x <- log(lasso_fit$lambda[L])
+        y <- lasso_fit$beta[, L]
+        labs <- names(y)
+        text(x, y, labels=labs)
+}
+
+# Fit lasso model
+lasso_fit <- glmnet(data.matrix(train_data[,-1]), train_data[,1], family = "binomial", 
+                      alpha = 1, lambda = lambdas)
+
+# Plot lasso coefficients vs. lambda
+plot(lasso_fit, xvar = "lambda", xlim = c(-15, 0))
+lbs_fun(lasso_fit)
+```
+
+## Predict Gentrification with Ridge
+
+```{r}
+# Perform cross-validation to tune lambda
+ridge_cv <- cv.glmnet(data.matrix(train_data[,-1]), train_data[,1], family = "binomial", 
+                      alpha = 0, type.measure = "auc", lambda = lambdas)
+
+# Predict on test data
+ridge_y_hat <- round(predict(ridge_cv, newx = data.matrix(test_data[,-1]), s = "lambda.min", type = "response"))
+
+# Prediction accuracy
+ridge_acc <- mean(ridge_y_hat == test_data[,1])
+```
+
+## Predict with Random Forest
+
+### Choose number of trees
+
+```{r}
+# Run Random Forest model without tuning
+tree_tune <- randomForest(formula = vulnerable ~ ., data = train_data)
+
+# Build data frame for errors to plot
+tree_tune_err <- data.frame(ntree = 1:length(tree_tune$err.rate[,1]), oob_error = tree_tune$err.rate[,1])
+
+# Plot error 
+ggplot(data = tree_tune_err, aes(x = ntree, y = oob_error)) +
+  geom_line()
+```
+
+### Tune other hyper-parameters
+
+```{r}
+# Create hyper-parameter grid
+tune_grid <- expand.grid(
+  mtry       = seq(1, 13),
+  sampsize = round(c(.55, .632, .70, .75, .80)*nrow(train_data)),
+  nodesize  = seq(1, 12)
+)
+
+# Tune model using OOB error
+for(i in 1:nrow(tune_grid)) {
+  
+  # Train model
+  grid_fit <- randomForest(
+    formula = vulnerable ~ ., 
+    data = train_data, 
+    num.trees = 300,
+    mtry = tune_grid$mtry[i],
+    sampsize = tune_grid$sampsize[i],
+    nodesize = tune_grid$nodesize[i])
+  
+  # Record OOB error
+  tune_grid$OOB_error[i] <- grid_fit$err.rate[,1]
+}
+
+# Print best combination of results
+head(tune_grid[order(tune_grid$OOB_error),])
+```
+
+### Predict on test set
+
+```{r}
+# Retrain random forest model on optimal hyper-parameter values
+rf_best_fit <- randomForest(
+    formula = vulnerable ~ ., 
+    data = train_data, 
+    num.trees = 300,
+    mtry = 13,
+    sampsize = 428,
+    nodesize = 2)
+
+# Predict on test set
+rf_y_hat <- predict(rf_best_fit, test_data)
+
+# Prediction accuracy
+rf_acc <- mean(rf_y_hat == test_data[,1])
+```
+
+## Predict with Xgboost
+
+```{r}
+# Change training labels
+train_data$vulnerable <- ifelse(train_data$vulnerable == 1, "Yes", "No")
+test_data$vulnerable <- ifelse(test_data$vulnerable == 1, "Yes", "No")
+
+
+# Create tuning controls for 5-fold CV
+tune_control <- trainControl(method = "cv", 
+                             number = 5,
+                             classProbs = TRUE,
+                             summaryFunction = twoClassSummary)
+
+# Create tuning grid
+tune_grid <- expand.grid(
+  nrounds = seq(50, 300, 50),
+  max_depth = seq(2,6,2),
+  eta = seq(0.1,0.9,0.2),
+  gamma = c(0,1,5,10),
+  colsample_bytree = seq(0.1,1,.3),
+  min_child_weight = c(0,1,5,10),
+  subsample = seq(0.1,1,.3)
+  )
+
+# Fit model with 5-fold CV
+xgb_tune_cv <- train(vulnerable ~ ., data = train_data, 
+                 method = "xgbTree", 
+                 trControl = tune_control, 
+                 verbose = TRUE, 
+                 tuneGrid = tune_grid,
+                 metric = "ROC")
+```
+
+```{r}
+# Re-factor training labels
+train_data$vulnerable <- as.numeric(ifelse(train_data$vulnerable == "Yes", 1, 0))
+test_data$vulnerable <- as.numeric(ifelse(test_data$vulnerable == "Yes", 1, 0))
+
+
+# Re-fit model at optimal training values
+xgb_fit <- xgboost(data = data.matrix(train_data[,-1]),
+                   label = train_data[,1],
+                   nrounds = xgb_tune_cv$bestTune[["nrounds"]],
+                   objective = "binary:logistic",
+                   verbose = 0,
+                   params = list(max_depth = xgb_tune_cv$bestTune[["max_depth"]],
+                                 eta = xgb_tune_cv$bestTune[["eta"]],
+                                 gamma = xgb_tune_cv$bestTune[["gamma"]],
+                                 colsample_bytree = xgb_tune_cv$bestTune[["colsample_bytree"]],
+                                 min_child_weight = xgb_tune_cv$bestTune[["min_child_weight"]],
+                                 subsample = xgb_tune_cv$bestTune[["subsample"]]))
+
+# Predict on the test set
+xgb_y_hat <- round(predict(xgb_fit, data.matrix(test_data[,-1]), type = "response"))
+
+# Prediction accuracy
+xgb_acc <- mean(xgb_y_hat == test_data[,1])
+```
